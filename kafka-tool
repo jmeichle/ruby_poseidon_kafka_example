@@ -1,0 +1,95 @@
+#!/usr/bin/env ruby
+
+require 'pathname'
+require 'thor'
+require 'poseidon'
+require 'poseidon_cluster'
+
+class Kafka < Thor
+  
+  desc 'partition-consumer TOPIC PARTITION_NUMBER', 'consumes from the passed TOPIC + partition number'
+  method_option :offset, :required => false, :type => :string, :aliases => "-o", :default => "latest", :desc => "The offset to start consuming from. This is either an integer, or 'earliest'/'latest'"
+  method_option :pretty, :required => false, :type => :boolean, :aliases => '-p', :default => false, :desc => "Format output with offset, key, value instead of just value"
+  method_option :output_file, :required => false, :type => :string, :aliases => '-f', :default => '', :desc => "file to write raw binary to, no newlines"
+  def partition_consumer(topic, partition_number)
+
+    if options[:offset].to_i.to_s != options[:offset]
+      unless %w(earliest latest).include?(options[:offset])
+        fail "Provided offset is not an integer or 'earliest'/'latest'"      
+      else
+        offset = "#{options[:offset]}_offset".to_sym
+      end
+    else
+      offset = options[:offset].to_i
+    end
+    fail "Partition number is not a number" if partition_number.to_i.to_s != partition_number
+
+    consumer = Poseidon::PartitionConsumer.new("consumer-#{SecureRandom.uuid}", "localhost", 9092,
+                           topic, partition_number.to_i, offset)
+    begin
+      fh = File.open(options[:output_file], 'a') if options[:output_file] != ''
+      loop do
+        messages = consumer.fetch
+        messages.each do |m|
+          if options[:pretty]
+            puts "O: #{m.offset}, Key: #{m.key}, Value: #{m.value}"
+          elsif options[:output_file] != ''
+            fh.write(m.value)
+          else
+            puts m.value
+          end
+        end
+      end
+    rescue Interrupt
+      puts " Caught Interrupt. Exiting"
+    ensure
+      fh.close if fh
+    end
+  end
+
+  desc 'consumer-group TOPIC CONSUMER_GROUP', 'consumes from all registered partitions from the passed TOPIC using the given CONSUMER_GROUP name'
+  method_option :pretty, :required => false, :type => :boolean, :aliases => '-p', :default => false, :desc => "Format output with offset, key, value instead of just value"
+  def consumer_group(topic, consumer_group)
+    consumer = Poseidon::ConsumerGroup.new(
+          consumer_group,                 # Group name
+          ["localhost:9092"],             # Kafka brokers
+          ["localhost:2181"],             # Zookeepers hosts
+          topic)                          # Topic name
+    begin
+      consumer.fetch_loop do |partition, bulk|
+        bulk.each do |m|
+          seen_values << m.value
+          if options[:pretty]
+          else
+            puts m.value
+          end
+        end
+      end
+    rescue Interrupt
+      puts " Caught Interrupt. Exiting"
+    end
+  end
+
+  desc 'producer TOPIC', 'Produce messages on TOPIC recieved per-line from STDIN'
+  # wow the default is a hack...
+  method_option :key, :required => :false, :type => :string, :aliases => '-k', :default => 'NO_KEY_SPECIFIED', :desc => "The key to produce messages with"
+  def producer(topic)
+    producer = Poseidon::Producer.new(["localhost:9092"], "producer-#{SecureRandom.uuid}", :type => :sync)
+    puts "options key.class : #{options[:key].class}"
+    begin
+      while a = $stdin.gets
+        messages = []
+        if options[:key] != 'NO_KEY_SPECIFIED'
+          messages << Poseidon::MessageToSend.new(topic, a.chomp, options[:key])
+        else
+          messages << Poseidon::MessageToSend.new(topic, a.chomp)
+        end
+        producer.send_messages(messages)
+      end
+    rescue Interrupt
+      puts " Caught Interrupt. Exiting"
+    end
+  end
+end
+
+Kafka.start
