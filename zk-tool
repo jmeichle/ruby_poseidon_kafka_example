@@ -1,0 +1,139 @@
+#!/usr/bin/env ruby
+
+require 'thor'
+require 'zk'
+
+class ZkAgent
+
+  def initialize
+    host = ENV['ZK_HOST'] ? ENV['ZK_HOST'] : 'localhost:2181'
+    zk = ZK.new(host)
+    yield zk
+  end
+
+end
+
+class ZkTool < Thor
+
+  GENERIC_LONG_DESC = 'The $ZK_HOST env variable is the host:port for the zk connection.'
+
+  no_tasks do
+
+    # Helper method to print znodes
+    def print_children(path, indent_size)
+      indent = "--" * indent_size
+      begin
+        puts "#{indent}#{path} data: #{@zk.get(path)[0]}"
+        children = @zk.children(path) #.each do |child_path|
+        unless children.empty?
+          puts "#{indent}#{path} has #{children.size} children"
+          children.each do |child|
+            if path != '/'
+              child_path = "#{path}/#{child}"
+            else
+              child_path = "/#{child}"
+            end
+            print_children(child_path, indent_size+1)
+          end
+        end
+      rescue ZK::Exceptions::NoNode
+
+      end
+    end	
+
+    # Helper method to delete znodes
+    def delete_node(path, force = false)
+      while true
+        begin
+          @zk.delete(path)
+          puts "Deleted #{path}"
+        rescue ZK::Exceptions::NotEmpty
+          # Catch node exists, walk lower, call delete_node w/ args on it. 
+          # This will recursively delete nodes under a path.
+          if force
+            children = @zk.children(path)
+            children.each do |child_path|
+              delete_node("#{path}/#{child_path}", force)
+            end
+          else
+            puts "ERROR: Cannot delete #{path} as it is not empty. Delete with force to recursively delete"
+            break
+          end
+        rescue ZK::Exceptions::NoNode
+          # break the while loop if no node is reported
+          break
+        end
+      end
+    end
+
+    def workaround_paths(path)
+      # workaround paths w/ trailing /
+      if path[-1] == '/'
+        unless path == '/'
+          path[0..-2]
+        end
+        path
+      end
+      path
+    end
+  end
+
+  desc 'list PATH', 'List zookeeper heirarchy at given PATH'
+  long_desc GENERIC_LONG_DESC
+  def list(path)
+    path = workaround_paths(path)
+    ZkAgent.new do |zk|
+      @zk = zk
+      print_children(path, 1)
+    end
+  end
+
+  desc 'delete PATH', 'Delete a znode at a given path. This will error if the znode has children, but can recursively delete with -f'
+  long_desc GENERIC_LONG_DESC
+  method_option :force, :aliases => '-f', :type => :boolean, :optional => true, :default => false, :desc => "Forcefully delete this znode and all children"
+  def delete(path)
+    path = workaround_paths(path)
+    ZkAgent.new do |zk|
+      @zk = zk
+      delete_node(path, options[:force])
+    end
+  end
+
+  desc 'set PATH', 'Set a znodes data at a given path.'
+  long_desc GENERIC_LONG_DESC
+  method_option :data, :aliases => '-d', :type => :string, :required => true, :default => nil, :desc => "The data for this znode as a string."
+  def set(path)
+    path = workaround_paths(path)
+    ZkAgent.new do |zk|
+      @zk = zk
+      @zk.set(path, options[:data])
+    end
+  end
+
+  desc 'create PATH', 'Create a znode at the given PATH.'
+  long_desc GENERIC_LONG_DESC
+  method_option :data, :aliases => '-d', :type => :string, :required => true, :default => nil, :desc => "The data for this znode as a string."
+  method_option :ephemeral, :aliases => '-e', :type => :boolean, :optional => true, :default => false, :desc => "Mark this znode as ephemeral. This prevents children, and will block the CLI tool in an infinte sleep"
+  def create(path)
+    path = workaround_paths(path)
+    ZkAgent.new do |zk|
+      begin
+        path = zk.create(path, ephemeral: options[:ephemeral]) 
+        if !options[:data].nil?
+          zk.set(path, options[:data])
+        end
+        puts "Created #{path} as ephemeral=#{options[:ephemeral].to_s} with data: #{options[:data]}"
+        if options[:ephemeral] == true
+          puts "Sleeping forever"
+          while true
+            sleep 1
+          end
+        end
+      rescue ZK::Exceptions::NodeExists
+        puts "ERROR: Node exists at path: #{path}"
+      end
+    end
+  end
+end
+
+ZkTool.start
