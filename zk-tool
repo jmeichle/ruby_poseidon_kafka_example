@@ -4,13 +4,64 @@ require 'thor'
 require 'zk'
 
 class ZkAgent
-
   def initialize
     host = ENV['ZK_HOST'] ? ENV['ZK_HOST'] : 'localhost:2181'
     zk = ZK.new(host)
     yield zk
   end
+end
 
+# Straight out of the zk gems example dir, with tweaks
+class BlockUntilNodeDeleted
+  attr_reader :zk
+
+  def initialize(zk, path)
+    @zk = zk
+    @path = path
+  end
+
+  def block_until_node_deleted
+    queue = Queue.new
+    # Register a callback function for the path
+    ev_sub = zk.register(@path) do |event|
+      # If callback event is a node deletion, then push to the queue unblocking the function
+      if event.node_deleted?
+        queue.enq(:deleted) 
+      else
+        # we have a node event. Check if the node exists, while re-setting a watch event.
+        # remember, there is a race here where the node might change. between re-watching...
+        if zk.exists?(@path, :watch => true)
+          # if its a node change event, print.
+          if event.node_changed?
+            puts "Node changed: '#{zk.get(@path)[0]}'"
+          end
+        else
+          # The node actually doesn't exist, even if the event is not a node deleted event,
+          # we check if the node exists for re-watching, so handle the case in which the node
+          # was deleted
+          queue.enq(:deleted) 
+        end
+      end
+    end
+    # set up the callback, but bail if we don't need to wait
+    unless zk.exists?(@path, :watch => true)  
+      puts "Node does not exist"
+      return false 
+    end
+    queue.pop # block waiting for node deletion
+    puts "Node has been deleted."
+    true
+  ensure
+    ev_sub.unsubscribe
+  end
+
+  def run
+    waiter = Thread.new do
+      puts "Watching node '#{@path}' for changes or deletion"
+      block_until_node_deleted
+    end
+    waiter.join
+  end
 end
 
 class ZkTool < Thor
@@ -134,6 +185,14 @@ class ZkTool < Thor
       end
     end
   end
+
+  desc 'watch PATH', "Watch a path. print when it changes, and return when it is deleted."
+  def watch(path)
+    ZkAgent.new do |zk|
+      BlockUntilNodeDeleted.new(zk, path).run
+    end
+  end
+
 end
 
 ZkTool.start
