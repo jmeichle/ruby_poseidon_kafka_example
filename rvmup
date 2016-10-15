@@ -83,3 +83,14 @@ _setupRuby
 # Ensure bundler is installed, and bundle install is happy. This might be too much and should be a helper.
 # same with clearing RVM and re-bundle installing
 _setupBundler
+
+
+# This is just nice to have
+
+function EphemeralPort {
+	ARG1=$1;
+	evalstr="perl -ne '/(\d*)-((\>)($ARG1)\/tcp)/ && print \"\$1\n\"'";
+	docker ps | eval $evalstr;
+}
+
+alias up=". $(pwd)/rvmup"

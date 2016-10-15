@@ -26,7 +26,7 @@ class Kafka < Thor
     fail "Partition number is not a number" if partition_number.to_i.to_s != partition_number
 
     # @todo
-    kafka_broker_host_chunks = ENV['KAFKA_BROKERS'].split(',').split(':')
+    kafka_broker_host_chunks = ENV['KAFKA_BROKERS'].split(',').first.split(':')
 
     consumer = Poseidon::PartitionConsumer.new("consumer-#{SecureRandom.uuid}", kafka_broker_host_chunks.first, kafka_broker_host_chunks.last.to_i,
                            topic, partition_number.to_i, offset)
@@ -63,7 +63,6 @@ class Kafka < Thor
     begin
       consumer.fetch_loop do |partition, bulk|
         bulk.each do |m|
-          seen_values << m.value
           if options[:pretty]
           else
             puts m.value
