@@ -60,7 +60,7 @@ function _installBundler {
 
 function _bundleInstall {
   tmpfilename=$(tempfile)
-  bundle install &> tmpfilename;
+  bundle install &> $tmpfilename;
   if [[ "$?" != "0" ]]; then
     echo "ERROR during bundle install:";
     cat $tmpfilename

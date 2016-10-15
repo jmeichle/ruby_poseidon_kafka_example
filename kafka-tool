@@ -4,6 +4,7 @@ require 'pathname'
 require 'thor'
 require 'poseidon'
 require 'poseidon_cluster'
+require 'securerandom'
 
 class Kafka < Thor
   
@@ -24,7 +25,10 @@ class Kafka < Thor
     end
     fail "Partition number is not a number" if partition_number.to_i.to_s != partition_number
 
-    consumer = Poseidon::PartitionConsumer.new("consumer-#{SecureRandom.uuid}", "localhost", 9092,
+    # @todo
+    kafka_broker_host_chunks = ENV['KAFKA_BROKERS'].split(',').split(':')
+
+    consumer = Poseidon::PartitionConsumer.new("consumer-#{SecureRandom.uuid}", kafka_broker_host_chunks.first, kafka_broker_host_chunks.last.to_i,
                            topic, partition_number.to_i, offset)
     begin
       fh = File.open(options[:output_file], 'a') if options[:output_file] != ''
@@ -51,10 +55,11 @@ class Kafka < Thor
   method_option :pretty, :required => false, :type => :boolean, :aliases => '-p', :default => false, :desc => "Format output with offset, key, value instead of just value"
   def consumer_group(topic, consumer_group)
     consumer = Poseidon::ConsumerGroup.new(
-          consumer_group,                 # Group name
-          ["localhost:9092"],             # Kafka brokers
-          ["localhost:2181"],             # Zookeepers hosts
-          topic)                          # Topic name
+          consumer_group,                  # Group name
+          ENV['KAFKA_BROKERS'].split(','), # Kafka brokers
+          ENV['ZK_HOST'].split(','),       # Zookeepers hosts # @todo sync with zk-tool on one variable
+          topic                            # Topic name
+    )
     begin
       consumer.fetch_loop do |partition, bulk|
         bulk.each do |m|
@@ -74,7 +79,7 @@ class Kafka < Thor
   # wow the default is a hack...
   method_option :key, :required => :false, :type => :string, :aliases => '-k', :default => 'NO_KEY_SPECIFIED', :desc => "The key to produce messages with"
   def producer(topic)
-    producer = Poseidon::Producer.new(["localhost:9092"], "producer-#{SecureRandom.uuid}", :type => :sync)
+    producer = Poseidon::Producer.new(ENV['KAFKA_BROKERS'].split(','), "producer-#{SecureRandom.uuid}", :type => :sync)
     puts "options key.class : #{options[:key].class}"
     begin
       while a = $stdin.gets
