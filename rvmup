@@ -1,0 +1,85 @@
+#!/bin/bash
+
+export RUBY_VERSION=$(cat .ruby-version)
+export RVM_GEMSET_NAME=$(basename $(pwd))
+
+function _printDivider {
+  echo -ne "\n\n=============================\n\n";
+}
+
+function _useGemset {
+  rvm use $RUBY_VERSION@$RVM_GEMSET_NAME &>/dev/null
+}
+
+function _createGemset {
+  _printDivider
+  echo "Creating RVM gemset $RVM_GEMSET_NAME";
+  echo
+  rvm gemset create $RVM_GEMSET_NAME
+  _printDivider
+  _useGemset
+}
+
+function _installRuby {
+  _printDivider
+  echo "Installing ruby $RUBY_VERSION";
+  echo
+  rvm install $RUBY_VERSION
+  _printDivider
+}
+
+function _useRuby {
+  rvm use $RUBY_VERSION
+}
+
+function _setupGemset {
+  if [[ `rvm gemset list | grep $RVM_GEMSET_NAME` ]]; then
+    _useGemset
+  else
+    _createGemset
+    _useGemset
+  fi
+}
+
+function _setupRuby {
+  if [[ `rvm list | grep $RUBY_VERSION` ]]; then
+    _setupGemset
+  else
+    _installRuby
+    _setupGemset
+  fi
+}
+
+function _installBundler {
+  _printDivider
+  echo "Installing bundler:"
+  echo
+  gem install bundler
+  _printDivider
+}
+
+function _bundleInstall {
+  tmpfilename=$(tempfile)
+  bundle install &> tmpfilename;
+  if [[ "$?" != "0" ]]; then
+    echo "ERROR during bundle install:";
+    cat $tmpfilename
+  fi
+  rm $tmpfilename;
+}
+
+# bundle install stuff, why not
+function _setupBundler {
+  bundle &>/dev/null;
+  if [[ "$?" == "127" ]]; then
+    _installBundler
+  fi
+  _bundleInstall
+}
+
+# Using RVM, ensure $RUBY_VERSION is installed, and a gemset
+# for the current directory name is in use
+_setupRuby 
+# Ensure bundler is installed, and bundle install is happy. This might be too much and should be a helper.
+# same with clearing RVM and re-bundle installing
+_setupBundler
