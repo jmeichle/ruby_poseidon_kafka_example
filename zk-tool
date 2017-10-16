@@ -132,10 +132,14 @@ class ZkTool < Thor
   no_tasks do
 
     # Helper method to print znodes
-    def print_children(path, indent_size)
+    def print_children(path, indent_size, skip_data)
       indent = "--" * indent_size
       begin
-        puts "#{indent}#{path} data: #{@zk.get(path)[0]}"
+        if skip_data
+          puts "#{indent}#{path}"
+        else
+          puts "#{indent}#{path} data: #{@zk.get(path)[0]}"
+        end
         children = @zk.children(path) #.each do |child_path|
         unless children.empty?
           puts "#{indent}#{path} has #{children.size} children"
@@ -145,7 +149,7 @@ class ZkTool < Thor
             else
               child_path = "/#{child}"
             end
-            print_children(child_path, indent_size+1)
+            print_children(child_path, indent_size+1, skip_data)
           end
         end
       rescue ZK::Exceptions::NoNode
@@ -191,12 +195,23 @@ class ZkTool < Thor
   end
 
   desc 'list PATH', 'List zookeeper heirarchy at given PATH'
+  method_option :skip_data, :aliases => '-s', :type => :boolean, :optional => true, :default => false, :desc => "Don't print znode data"
   long_desc GENERIC_LONG_DESC
   def list(path)
     path = workaround_paths(path)
     ZkAgent.new do |zk|
       @zk = zk
-      print_children(path, 1)
+      print_children(path, 1, options[:skip_data])
+    end
+  end
+
+  desc 'get PATH', 'List the data of a given PATH'
+  long_desc GENERIC_LONG_DESC
+  def get(path)
+    path = workaround_paths(path)
+    ZkAgent.new do |zk|
+      @zk = zk
+      puts @zk.get(path)[0]
     end
   end
 
@@ -213,12 +228,20 @@ class ZkTool < Thor
 
   desc 'set PATH', 'Set a znodes data at a given path.'
   long_desc GENERIC_LONG_DESC
-  method_option :data, :aliases => '-d', :type => :string, :required => true, :default => nil, :desc => "The data for this znode as a string."
+  method_option :data, :aliases => '-d', :type => :string, :required => false, :default => nil, :desc => "The data for this znode as a string."
+  method_option :data_file, :aliases => '-D', :type => :string, :required => false, :default => nil, :desc => "The data file for this znode as a string."
   def set(path)
     path = workaround_paths(path)
     ZkAgent.new do |zk|
       @zk = zk
-      @zk.set(path, options[:data])
+      if options[:data]
+        data = options[:data]
+      elsif options[:data_file]
+        data = File.read(options[:data_file])
+      else
+        raise Thor::Error, '-d or -D must be provided to specify data on the command line or from a file'
+      end
+      @zk.set(path, data)
     end
   end
 
