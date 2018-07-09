@@ -138,7 +138,8 @@ class ZkTool < Thor
         if skip_data
           puts "#{indent}#{path}"
         else
-          puts "#{indent}#{path} data: #{@zk.get(path)[0]}"
+          get_result = @zk.get(path)
+          puts "#{indent}#{path} data (ephemeral=#{get_result[1].ephemeral?}): #{get_result[0]}"
         end
         children = @zk.children(path) #.each do |child_path|
         unless children.empty?
@@ -182,6 +183,14 @@ class ZkTool < Thor
       end
     end
 
+    # Helper method to delete znodes
+    def delete_node_children(path, force = false)
+      children = @zk.children(path)
+      children.each do |child_path|
+        delete_node("#{path}/#{child_path}", force)
+      end
+    end
+
     def workaround_paths(path)
       # workaround paths w/ trailing /
       if path[-1] == '/'
@@ -211,7 +220,9 @@ class ZkTool < Thor
     path = workaround_paths(path)
     ZkAgent.new do |zk|
       @zk = zk
-      puts @zk.get(path)[0]
+      znode = @zk.get(path)
+      puts "stat: created_time: #{znode[1].created_time} last_modified_time: #{znode[1].last_modified_time} ctime_t: #{znode[1].ctime_t} mtime_t: #{znode[1].mtime_t} created_zxid: #{znode[1].created_zxid} created_zxid: #{znode[1].created_zxid} last_modified_zxid: #{znode[1].last_modified_zxid}"
+      puts "data: #{znode[0]}"
     end
   end
 
@@ -226,15 +237,49 @@ class ZkTool < Thor
     end
   end
 
+  desc 'delete-children PATH', 'Delete all children of a znode at a given path. This will error if the znode has children, but can recursively delete with -f'
+  long_desc GENERIC_LONG_DESC
+  method_option :force, :aliases => '-f', :type => :boolean, :optional => true, :default => false, :desc => "Forcefully delete this znode and all children"
+  def delete_children(path)
+    path = workaround_paths(path)
+    ZkAgent.new do |zk|
+      @zk = zk
+      delete_node_children(path, options[:force])
+    end
+  end
+
+  desc 'purge', 'Deletes everything from zookeeper. this is super dangerous.'
+  long_desc GENERIC_LONG_DESC
+  def purge
+    puts "This will delete everything out of zookeeper. Are you absolutely sure????"
+    puts
+    system('ps -ef | grep zookeeper')
+    puts
+    puts "Are you really sure? This might be a tunnel..... sleeping 5 to be paranoid"
+    sleep(5)
+    input = ask "Type YES to continue if your really sure"
+    if input == "YES"
+      puts "NUKING!"
+      ZkAgent.new do |zk|
+        @zk = zk
+        @zk.children('/').each do |root_child|
+          unless root_child == 'zookeeper'
+            delete_node("/#{root_child}", true)
+          end
+        end
+      end
+    end
+  end
+
   desc 'set PATH', 'Set a znodes data at a given path.'
   long_desc GENERIC_LONG_DESC
-  method_option :data, :aliases => '-d', :type => :string, :required => false, :default => nil, :desc => "The data for this znode as a string."
+  method_option :data, :aliases => '-d', :type => :string, :required => false, :default => '', :desc => "The data for this znode as a string."
   method_option :data_file, :aliases => '-D', :type => :string, :required => false, :default => nil, :desc => "The data file for this znode as a string."
   def set(path)
     path = workaround_paths(path)
     ZkAgent.new do |zk|
       @zk = zk
-      if options[:data]
+      if options[:data] and not options[:data_file]
         data = options[:data]
       elsif options[:data_file]
         data = File.read(options[:data_file])
@@ -247,16 +292,21 @@ class ZkTool < Thor
 
   desc 'create PATH', 'Create a znode at the given PATH.'
   long_desc GENERIC_LONG_DESC
-  method_option :data, :aliases => '-d', :type => :string, :required => true, :default => nil, :desc => "The data for this znode as a string."
+  method_option :data, :aliases => '-d', :type => :string, :required => false, :default => '', :desc => "The data for this znode as a string."
+  method_option :data_file, :aliases => '-D', :type => :string, :required => false, :default => nil, :desc => "The data file for this znode as a string."
   method_option :ephemeral, :aliases => '-e', :type => :boolean, :optional => true, :default => false, :desc => "Mark this znode as ephemeral. This prevents children, and will block the CLI tool in an infinte sleep"
   def create(path)
     path = workaround_paths(path)
     ZkAgent.new do |zk|
       begin
-        path = zk.create(path, ephemeral: options[:ephemeral]) 
-        if !options[:data].nil?
-          zk.set(path, options[:data])
+        if options[:data] and not options[:data_file]
+          data = options[:data]
+        elsif options[:data_file]
+          data = File.read(options[:data_file])
+        else
+          raise Thor::Error, '-d or -D must be provided to specify data on the command line or from a file'
         end
+        path = zk.create(path, data, ephemeral: options[:ephemeral]) 
         puts "Created #{path} as ephemeral=#{options[:ephemeral].to_s} with data: #{options[:data]}"
         if options[:ephemeral] == true
           puts "Sleeping forever"
