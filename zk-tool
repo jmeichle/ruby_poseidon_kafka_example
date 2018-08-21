@@ -2,12 +2,19 @@
 
 require 'thor'
 require 'zk'
+require 'timeout'
 
 class ZkAgent
   def initialize
     host = ENV['ZK_HOST'] ? ENV['ZK_HOST'] : 'localhost:2181'
+    # begin
+    #   Timeout::timeout(5) do
     zk = ZK.new(host)
     yield zk
+    #   end
+    # rescue Timeout::Error
+    #   puts "Timed out connecting to #{host}"
+    # end
   end
 end
 
