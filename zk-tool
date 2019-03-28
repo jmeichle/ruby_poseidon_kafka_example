@@ -222,14 +222,19 @@ class ZkTool < Thor
   end
 
   desc 'get PATH', 'List the data of a given PATH'
+  method_option :only_data, :aliases => '-d', :type => :boolean, :optional => true, :default => false, :desc => "only print the znode data"
   long_desc GENERIC_LONG_DESC
   def get(path)
     path = workaround_paths(path)
     ZkAgent.new do |zk|
       @zk = zk
       znode = @zk.get(path)
-      puts "stat: created_time: #{znode[1].created_time} last_modified_time: #{znode[1].last_modified_time} ctime_t: #{znode[1].ctime_t} mtime_t: #{znode[1].mtime_t} created_zxid: #{znode[1].created_zxid} created_zxid: #{znode[1].created_zxid} last_modified_zxid: #{znode[1].last_modified_zxid}"
-      puts "data: #{znode[0]}"
+      if options[:only_data]
+        puts znode[0]
+      else
+        puts "stat: created_time: #{znode[1].created_time} last_modified_time: #{znode[1].last_modified_time} ctime_t: #{znode[1].ctime_t} mtime_t: #{znode[1].mtime_t} created_zxid: #{znode[1].created_zxid} created_zxid: #{znode[1].created_zxid} last_modified_zxid: #{znode[1].last_modified_zxid}"
+        puts "data: #{znode[0]}"
+      end
     end
   end
 
