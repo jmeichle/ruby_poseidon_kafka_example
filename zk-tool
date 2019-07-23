@@ -140,7 +140,7 @@ class ZkTool < Thor
 
     # Helper method to print znodes
     def print_children(path, indent_size, skip_data)
-      indent = "--" * indent_size
+      indent = "  " * indent_size
       begin
         if skip_data
           puts "#{indent}#{path}"
@@ -307,6 +307,7 @@ class ZkTool < Thor
   method_option :data, :aliases => '-d', :type => :string, :required => false, :default => '', :desc => "The data for this znode as a string."
   method_option :data_file, :aliases => '-D', :type => :string, :required => false, :default => nil, :desc => "The data file for this znode as a string."
   method_option :ephemeral, :aliases => '-e', :type => :boolean, :optional => true, :default => false, :desc => "Mark this znode as ephemeral. This prevents children, and will block the CLI tool in an infinte sleep"
+  method_option :sequential, :aliases => '-s', :type => :boolean, :optional => true, :default => false, :desc => "Mark this znode as sequential"
   def create(path)
     path = workaround_paths(path)
     ZkAgent.new do |zk|
@@ -318,7 +319,7 @@ class ZkTool < Thor
         else
           raise Thor::Error, '-d or -D must be provided to specify data on the command line or from a file'
         end
-        path = zk.create(path, data, ephemeral: options[:ephemeral]) 
+        path = zk.create(path, data, ephemeral: options[:ephemeral], sequential: options[:sequential]) 
         puts "Created #{path} as ephemeral=#{options[:ephemeral].to_s} with data: #{options[:data]}"
         if options[:ephemeral] == true
           puts "Sleeping forever"
@@ -348,7 +349,7 @@ class ZkTool < Thor
         puts Time.now.to_s
         puts "============================"
         things.last.each do |child_path|
-          puts "#{path}/#{child_path}"
+          puts "#{path}/#{child_path}, data: #{zk.get("#{path}/#{child_path}")[0]}"
         end
         puts "============================"
       end
